@@ -17,5 +17,6 @@ mydb=MySQL(host="localhost",
                   db="combined_orders")
 mydb.connect()
 
-    
+
+mydb.insert_table("table1", "Data\Data\orders_combined.csv")
     

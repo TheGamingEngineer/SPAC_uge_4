@@ -82,11 +82,16 @@ class MySQL:
             print("ERROR: For This either use a .csv file or a pandas dataframe. ")
             sys.exit()
         
-        columns=", ".join([f" '{col}' VARCHAR(255)" for col in list(data.columns)])
+        columns=", ".join([f" {col} VARCHAR(255)" for col in list(data.columns)])
         cursor= self.connection.cursor()    
-        cursor.execute(f"CREATE TABLE IF NOT EXISTS '{name}'  ({columns})")
-        self.connection.commit()
+        cursor.execute(f"CREATE TABLE IF NOT EXISTS {name}  ({columns})")
+        cursor.commit()
         
+        cols=", ".join(list(data.columns))
+        null_content=", ".join(["%s" for x in list(data.columns)])
         
-        cursor.execute()
+        command=f"INSERT INTO {name} ({cols}) VALUES ({null_content})"
+        content_tuples=list(data.itertuples(index=False,name=None))
+        cursor.executemany(command,content_tuples)
+        cursor.commit()
         
