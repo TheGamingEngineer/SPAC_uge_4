@@ -8,6 +8,8 @@ Created on Mon Mar 17 09:09:41 2025
 import mysql.connector
 import pandas
 import sys
+from tabulate import tabulate
+import os
 
 
 ## Jeg vælger at kombinere alle MySQL-funktionerne i én kommando for at gøre det mere overskueligt og lettere at håndtere forbindelsen
@@ -80,16 +82,15 @@ class MySQL:
             ## hvis brugeren kun vil have top X række, kan brugeren sætte fetch til et heltal. 
             if isinstance(fetch,int):
                 command+=f" LIMIT {fetch}"
-          
+            elif fetch.lower()=="first" or fetch.lower()=="one" or fetch.lower()=="top":
+                command+=" LIMIT 1"
             ## eksekver kommando
             interface.execute(command)
             
-            ## hvis man kun vil se den første række, kan man også vælge at sætte 'fetch' til "first", "one" eller "top"
-            if fetch.lower()=="first" or fetch.lower()=="one" or fetch.lower()=="top":
-                print(interface.fetchone())
-            else:
-                for x in interface.fetchall():
-                    print(x)
+            ## definer og vis tabel
+            column_names=[title[0] for title in interface.description]
+            table=interface.fecthall()
+            print(tabulate(table, headers=column_names, tablefmt="fancy_grid"))
             
         else:
             print("No Connection Established. Start A Session First.")
@@ -131,7 +132,7 @@ class MySQL:
     ## her menes det, at: 
     ### 'name' er navnet på tabellen i databasen
     ### 'tabel' er den tabel, som man gerne vil indsætte i databasen
-    def insert_table(self,name,tabel):
+    def import_table(self,name,tabel):
         ## hvis 'tabel' indhentes direkte fra en .csv fil, vil tabellen hentes og åbnes som en pandas.dataframe
         if not type(tabel)==pandas.core.frame.DataFrame and ".csv" in tabel:
             try:
@@ -243,10 +244,11 @@ class MySQL:
                     ## opbygger kommandoen.
                     command+=f" {x[0]} {x[1]}"
             
-            columns=interface.execute(command)
-            for x in columns:
-                print(x)
+            interface.execute(command)
+            table=interface.fetchall()
+            column_names = [column[0] for column in interface.description]
             
+            print(tabulate(table, headers=column_names, tablefmt="fancy_grid"))
         else:
             print("No Connection Established. Start A Session First.")
     
@@ -287,79 +289,154 @@ class MySQL:
     
     # Funktion til at slette kolonner fra en tabel i databasen.
     def delete_col(self,table,col):
-        interface=self.connection.cursor()
-        if type(col)==list:
-            col=", ".join(col)
-        elif type(col)==str and ", " not in col:
-            filter_list=col.split(",")
-            col=", ".join(filter_list)
-        command=f"ALTER TABLE {table} DROP COLUMN {col}"
-        interface.execute(command)
+        if self.connection:  
+            interface=self.connection.cursor()
+            if type(col)==list:
+                col=", ".join(col)
+            elif type(col)==str and ", " not in col:
+                filter_list=col.split(",")
+                col=", ".join(filter_list)
+            command=f"ALTER TABLE {table} DROP COLUMN {col}"
+            interface.execute(command)
+        else:
+            print("No Connection Established. Start A Session First.")
     
     # Funktion til at tilføje en kolonne til en tabel i databasen.
     def add_col(self,table,col,coltype):
-        interface=self.connection.cursor()
-        if type(col)==list:
-            col=", ".join(col)
-        elif type(col)==str and ", " not in col:
-            filter_list=col.split(",")
-            col=", ".join(filter_list)
-        command=f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"
-        interface.execute(command)
+        if self.connection:  
+            interface=self.connection.cursor()
+            if type(col)==list:
+                col=", ".join(col)
+            elif type(col)==str and ", " not in col:
+                filter_list=col.split(",")
+                col=", ".join(filter_list)
+            command=f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"
+            interface.execute(command)
+        else:
+            print("No Connection Established. Start A Session First.")
     
     # funktion til at vise en grupperet tabel over data i en tabel i en database
     def group_by(self,table,col="*",grouping=[]):
-        interface=self.connection.cursor()
-        ## strukturer kolonnerne, så de passer til kommandoen.
-        if type(col)==list:
-            col=", ".join(col)
-        elif type(col)==str and ", " not in col:
-            col=col.split(",")
-            col=", ".join(col)
-        ## strukturer grupperingskriterier, så de passer til kommandoen    
-        if type(grouping)==list:
-            col=", ".join(col)
-        elif type(grouping)==str and ", " not in grouping:
-            grouping=grouping.split(",")
-            grouping=", ".join(grouping)
-        ## opstil og eksekver kommando
-        command=f"SELECT {col} FROM {table} GROUP BY {grouping}"
-        tabel=interface.execute(command)
-        ## udskriv grupperet tabel
-        for x in tabel:
-            print(x)
-    
+        if self.connection: 
+            interface=self.connection.cursor()
+            ## strukturer kolonnerne, så de passer til kommandoen.
+            if type(col)==list:
+                col=", ".join(col)
+            elif type(col)==str and ", " not in col:
+                col=col.split(",")
+                col=", ".join(col)
+                ## strukturer grupperingskriterier, så de passer til kommandoen    
+            if type(grouping)==list:
+                col=", ".join(col)
+            elif type(grouping)==str and ", " not in grouping:
+                grouping=grouping.split(",")
+                grouping=", ".join(grouping)
+            ## opstil og eksekver kommando
+            command=f"SELECT {col} FROM {table} GROUP BY {grouping}"
+            interface.execute(command)
+            table = interface.fetchall()
+            column_names=[column[0] for column in interface.description]
+            ## udskriv grupperet tabel
+            print(tabulate(table, headers=column_names, tablefmt="fancy_grid"))
+        else:
+            print("No Connection Established. Start A Session First.")
     
     # funktion til at tilføje rækker til en tabel i databasen. 
     ## 'cols' og 'vals' skal være lister med henholdsvist kolonnenavne i tabellen og de værdier, som man vil indsætte.
     def add_row(self,table,cols=[],vals=[]):
-        interface=self.connection.cursor()
-        ## typisk vil antal kolonner og celler være nogle stykker, så det vil være lettest at bearbejde dem i lister
-        if type(cols)!=list or type(vals)!=list:
-            raise TypeError("Variables 'cols' and 'vals' must be lists!")
+        if self.connection: 
+            interface=self.connection.cursor()
+            ## typisk vil antal kolonner og celler være nogle stykker, så det vil være lettest at bearbejde dem i lister
+            if type(cols)!=list or type(vals)!=list:
+                raise TypeError("Variables 'cols' and 'vals' must be lists!")
+                
+            ## for insert kommandoen SKAL antal kolonner og celler stemme overens med tabellen
+            interface.execute(f"SHOW COLUMNS FROM {table}")
+            table_cols=len(interface.fetchall())
+            if len(cols)!=len(vals)!=table_cols:
+                ValueError(f"Variables 'cols' and 'vals' must be of equal lengths to the number of columns in table {table}")
         
-        ## for insert kommandoen SKAL antal kolonner og celler stemme overens med tabellen
-        interface.execute(f"SHOW COLUMNS FROM {table}")
-        table_cols=len(interface.fetchall())
-        if len(cols)!=len(vals)!=table_cols:
-            ValueError(f"Variables 'cols' and 'vals' must be of equal lengths to the number of columns in table {table}")
-        
-        ## variablerne skal tilpasses kommandoen
-        columns="("+", ".join(cols)+")"
-        empty_cells="("+", ".join(['%s']*len(vals))+")"
-        
-        ## så har vi nok til kommandoen
-        command=f"INSERT INTO {table} {columns} VALUES {empty_cells}"
-        interface.execute(command,vals)
-    
+            ## variablerne skal tilpasses kommandoen
+            columns="("+", ".join(cols)+")"
+            empty_cells="("+", ".join(['%s']*len(vals))+")"
+            
+            ## så har vi nok til kommandoen
+            command=f"INSERT INTO {table} {columns} VALUES {empty_cells}"
+            interface.execute(command,vals)
+        else:
+            print("No Connection Established. Start A Session First.")
+            
     # funktion til at fjerne rækker i en tabel i databasen
     ## 'col_name' skal være en streng svarende til et kolonnenavn i tabellen
     ## 'col_val' skal bare være en enkelt værdi, som selekteres for i kolonnen.
     def delete_row(self,table,col_name,col_val):
-        interface=self.connection.cursor()
-        command=f"DELETE FROM {table} WHERE {col_name} = %s"
-        interface.execute(command,col_val)
-        
-        
-        
-        
+        if self.connection: 
+            interface=self.connection.cursor()
+            command=f"DELETE FROM {table} WHERE {col_name} = %s"
+            interface.execute(command,col_val)
+        else:
+            print("No Connection Established. Start A Session First.")
+            
+    # funktion til at vise en table for en join-query imellem to tabeller
+    ## 'table' variablerne referere til tabelnavnene og skal være en streng
+    ## 'col' variablberne referere til kolonnenavnet og skal være en streng med et enkelt kolonnenavn
+    ## 'common_key' referere til den fællesnøgle, som anvendes til join-funktionen og skal være en streng med et enkelt kolonnenavn
+    ## 'common_key' kan godt have forskellige navne i hver sin tabel, så det er derfor at der skelnes imellem højre og venstre.
+    ## 'direction' definere retningen for join-query.
+    ### Den kan også tage højde for full-join-query ved at skrive 'full'
+    def join_tables(self,left_table,left_col,right_table,right_col,left_common_key,right_common_key,direction="inner"):
+        if self.connection: 
+            interface=self.connection.cursor()
+            ## opsætter de primære kommandoer for join-query
+            base_command=f"SELECT {left_table}.{left_col}, {right_table}.{right_col} FROM {left_table} "
+            
+            ## her tages der højde for at brugeren kan skrive 'direction' med småt
+            direction=direction.upper()
+            
+            ## basis retningskommandoen defineres her. 
+            direction_command=f" JOIN {right_table} ON {left_table}.{left_common_key} = {right_table}.{right_common_key}"
+            
+            ## her skelnes der imellem almindelige join-queries og full join-query
+            if direction!="FULL":
+                command=base_command + direction + direction_command
+            else:
+                command= base_command + "LEFT" + direction_command + " UNION " + base_command + "RIGHT" + direction_command 
+                
+            interface.execute(command)
+            results=interface.fetchall()
+            
+            column_names=[title[0] for title in interface.description]
+            
+            print(tabulate(results, headers=column_names, tablefmt="fancy_grid"))
+        else:
+            print("No Connection Established. Start A Session First.")
+    
+    
+    # Funktion, som eksportere tabeller fra databasen til computeren. 
+    ## 'file_path' definere stien til mappen, som filerne skal downloades til
+    ## 'table_name' definere tabellen/tabellerne, som skal hentes. 
+    ## hvis 'table_name' defineres som "*" (som er standard), hentes alle 
+    def export_tables(self,file_path,table_name="*"):
+        if self.connection: 
+            interface=self.connection.cursor()
+            
+            if table_name=="*":
+                interface.execute("SHOW TABLES")
+                tables=interface.fetchall()
+            else:
+                tables=[(table_name,0)]
+                
+            for table in tables:
+                table_name=table[0]
+                
+                interface.execute(f"SELECT * FROM {table_name}")
+                table=interface.fetchall()
+                
+                column_names=[col[0] for col in interface]
+                
+                df = pandas.DataFrame(table, columns=column_names)
+                final_path = os.path.join(file_path,f"{table_name}.csv")
+                df.to_csv(final_path,index=False)
+                
+        else:
+            print("No Connection Established. Start A Session First.")

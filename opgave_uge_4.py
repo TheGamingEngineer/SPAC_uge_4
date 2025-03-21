@@ -18,7 +18,7 @@ mydb.connect()
 
 mydb.use_db("combined_orders")
 
-mydb.insert_table("table1", "Data\Data\orders_combined.csv")
+mydb.import_table("table1", "Data\Data\orders_combined.csv")
 
 mydb.show_table("table1")
 
