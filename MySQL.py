@@ -89,7 +89,7 @@ class MySQL:
             
             ## definer og vis tabel
             column_names=[title[0] for title in interface.description]
-            table=interface.fecthall()
+            table=interface.fetchall()
             print(tabulate(table, headers=column_names, tablefmt="fancy_grid"))
             
         else:
@@ -110,9 +110,8 @@ class MySQL:
             db_interface=self.connection.cursor()
             db_interface.execute("SHOW DATABASES")
             db_check=[x[0] for x in db_interface.fetchall()]
-            db_interface.close()
             if db in db_check:
-                self.connection.cursor().execute(f"DROP DATABASE IF EXISTS {db}")
+                db_interface.execute(f"DROP DATABASE IF EXISTS {db}")
             else:
                 print(f"ERROR: Database {db} Not Found On Server. ")
         else:
@@ -200,7 +199,14 @@ class MySQL:
     def rename_db(self,old_name,new_name):
         if self.connection:  
             interface=self.connection.cursor()
-            interface.execute(f"CREATE DATABASE {new_name}")
+            interface.execute("SHOW DATABASES")
+            db_check=[x[0] for x in interface.fetchall()]
+            
+            # hvis den nye database findes, vil der være fejl. 
+            if new_name not in db_check:
+                interface.execute(f"CREATE DATABASE {new_name}")
+            else:
+                raise mysql.connector.Error(f"ERROR: {new_name} Already Exists On The Server.")
             interface.execute(f"SHOW TABLES FROM {old_name}")
             tables=interface.fetchall()
             ## flytter hver tabel fra database 'old_name' til database 'new_name'
@@ -213,7 +219,7 @@ class MySQL:
                 self.connection.database=new_name
                 self.db=new_name
             interface.execute(f"DROP DATABASE {old_name}")
-            
+            #interface.commit()
         else:
             print("No Connection Established. Start A Session First.")
     
@@ -253,7 +259,7 @@ class MySQL:
             print("No Connection Established. Start A Session First.")
     
     # Funktion, som filtere en tabel til en ny tabel
-    def fitler_table(self,table,new_table,col="*",filters=[],andor=[]):
+    def filter_table(self,table,new_table,col="*",filters=[],andor=[]):
         if self.connection:  
             interface=self.connection.cursor()
             ## hvis brugeren vælger en liste af variabler, skal det lige bearbejdes, så det kan læses som en SQL kommando
@@ -263,7 +269,7 @@ class MySQL:
             elif type(col)==str and ", " not in col:
                 filter_list=col.split(",")
                 filter_list=", ".join(filter_list)
-            command=f"SELECT {col} INTO {new_table} FROM {table}"
+            command=f"CREATE TABLE {new_table} SELECT {col} FROM {table}"
             ## såfremt at 'filters' og 'andor' er ikke-tomme lister, vil det, som skrives i dem blive skrevet som kommando
             if type(filters)==type(andor)==list and len(filters)!=0 and len(andor)!=0:
                 ## er der filtre, skal det initieres med WHERE
@@ -327,7 +333,7 @@ class MySQL:
                 col=", ".join(col)
                 ## strukturer grupperingskriterier, så de passer til kommandoen    
             if type(grouping)==list:
-                col=", ".join(col)
+                grouping=", ".join(grouping)
             elif type(grouping)==str and ", " not in grouping:
                 grouping=grouping.split(",")
                 grouping=", ".join(grouping)
@@ -372,45 +378,12 @@ class MySQL:
     def delete_row(self,table,col_name,col_val):
         if self.connection: 
             interface=self.connection.cursor()
+            col_val=(col_val,)
             command=f"DELETE FROM {table} WHERE {col_name} = %s"
             interface.execute(command,col_val)
         else:
             print("No Connection Established. Start A Session First.")
             
-    # funktion til at vise en table for en join-query imellem to tabeller
-    ## 'table' variablerne referere til tabelnavnene og skal være en streng
-    ## 'col' variablberne referere til kolonnenavnet og skal være en streng med et enkelt kolonnenavn
-    ## 'common_key' referere til den fællesnøgle, som anvendes til join-funktionen og skal være en streng med et enkelt kolonnenavn
-    ## 'common_key' kan godt have forskellige navne i hver sin tabel, så det er derfor at der skelnes imellem højre og venstre.
-    ## 'direction' definere retningen for join-query.
-    ### Den kan også tage højde for full-join-query ved at skrive 'full'
-    def join_tables(self,left_table,left_col,right_table,right_col,left_common_key,right_common_key,direction="inner"):
-        if self.connection: 
-            interface=self.connection.cursor()
-            ## opsætter de primære kommandoer for join-query
-            base_command=f"SELECT {left_table}.{left_col}, {right_table}.{right_col} FROM {left_table} "
-            
-            ## her tages der højde for at brugeren kan skrive 'direction' med småt
-            direction=direction.upper()
-            
-            ## basis retningskommandoen defineres her. 
-            direction_command=f" JOIN {right_table} ON {left_table}.{left_common_key} = {right_table}.{right_common_key}"
-            
-            ## her skelnes der imellem almindelige join-queries og full join-query
-            if direction!="FULL":
-                command=base_command + direction + direction_command
-            else:
-                command= base_command + "LEFT" + direction_command + " UNION " + base_command + "RIGHT" + direction_command 
-                
-            interface.execute(command)
-            results=interface.fetchall()
-            
-            column_names=[title[0] for title in interface.description]
-            
-            print(tabulate(results, headers=column_names, tablefmt="fancy_grid"))
-        else:
-            print("No Connection Established. Start A Session First.")
-    
     
     # Funktion, som eksportere tabeller fra databasen til computeren. 
     ## 'file_path' definere stien til mappen, som filerne skal downloades til
@@ -420,23 +393,74 @@ class MySQL:
         if self.connection: 
             interface=self.connection.cursor()
             
+            ## angives 'table_name' som "*", vil alle tabeller i den nuværende database blive eksporteret
             if table_name=="*":
                 interface.execute("SHOW TABLES")
                 tables=interface.fetchall()
             else:
-                tables=[(table_name,0)]
-                
+                tables=[(table_name,0)] # formatet er anderledes ved fetchall(), så for ikke at lave hver sin eksport-funktion, so laves dette som en meget kort list of tuples
+            
+            ## iterere over tabellerne og eksportere dem en for en. 
             for table in tables:
                 table_name=table[0]
-                
+                ## henter tabelindmad
                 interface.execute(f"SELECT * FROM {table_name}")
                 table=interface.fetchall()
-                
-                column_names=[col[0] for col in interface]
-                
+                ## henter kolonnenavne
+                interface.execute(f"SELECT * FROM {table_name} LIMIT 1")
+                descriptions=interface.description
+                column_names=[col[0] for col in descriptions]
+                ## konvertere tabellen til dataframe og skriver til en csv fil
                 df = pandas.DataFrame(table, columns=column_names)
                 final_path = os.path.join(file_path,f"{table_name}.csv")
                 df.to_csv(final_path,index=False)
-                
+            _=interface.fetchall() ## henter ubrugt data for at sikre at vi kan bruge cursor igen.
+            interface.close()
         else:
             print("No Connection Established. Start A Session First.")
+    
+    # funktion til at sammenflette to tabeller med en fælles nøgle.
+    ## Jeg havde tænkt på at lave det som en multi-flet-funktion, hvor man kunne flette mere end 2 tabeller.
+    ## men det var svært at tage højde for de forskellige nøgler. 
+    def join_tables(self, left_table, right_table, new_table, common_key, direction="INNER"):
+        if self.connection:
+            interface=self.connection.cursor()
+            
+            ## få alle kolonnerne fra venstre til højre
+            interface.execute(f"SHOW COLUMNS FROM {left_table}")
+            left_columns=[name[0] for name in interface.fetchall()]
+            interface.execute(f"SHOW COLUMNs FROM {right_table}")
+            right_columns=[name[0] for name in interface.fetchall()]
+            
+            ## Vi er nød til at omdøbe variablerne, hvis der er duplikater. 
+            columns_renamed=[f"{right_table}.{col} AS {right_table}_{col}" if col in left_columns and col!=common_key else f"{right_table}.{col}" for col in right_columns if col != common_key]
+            select_columns=", ".join([f"{left_table}.{col}" for col in left_columns] + columns_renamed)
+            
+            ## opsætter de primære kommandoer for join-query
+            base_command=f"CREATE TABLE {new_table} AS SELECT {select_columns} FROM {left_table} "
+            
+            ## her tages der højde for at brugeren kan skrive 'direction' med småt
+            direction=direction.upper()
+            
+            ## basis retningskommandoen defineres her. 
+            direction_command=f"{direction} JOIN {right_table} ON {left_table}.{common_key} = {right_table}.{common_key}"
+            
+            ## her skelnes der imellem almindelige join-queries og full join-query
+            command=base_command + direction_command
+            
+            ## eksevker kommandoen
+            interface.execute(command)
+            interface.close()
+        else:
+            print("No Connection Established. Start A Session First.")
+    
+    ## funktion, som tillader en at omdøbe en kolonne. 
+    def rename_col(self,table,old_colname,new_colname):
+        if self.connection:
+            interface=self.connection.cursor()
+            command=f"ALTER TABLE {table} CHANGE {old_colname} {new_colname} VARCHAR(255)"
+            interface.execute(command)
+            interface.close()
+        else:
+            print("No Connection Established. Start A Session First.")
+            
