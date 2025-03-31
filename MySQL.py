@@ -11,6 +11,7 @@ import sys
 from tabulate import tabulate
 import os
 import subprocess
+import sqlite3
 
 ## Jeg vælger at kombinere alle MySQL-funktionerne i én kommando for at gøre det mere overskueligt og lettere at håndtere forbindelsen
 class MySQL:
@@ -183,8 +184,15 @@ class MySQL:
     def show_db(self):
         if self.connection:  
             interface=self.connection.cursor()
+            ## finder lige navnet på den nuværende database
+            interface.execute("SELECT DATABASE()")
+            DB=interface.fetchone()
+            
+            ## også tabellerne fra databasen
             interface.execute("SHOW TABLES")
             tables=interface.fetchall()
+            
+            print(f"Present Database: {DB[0]} containing {len(tables)} Tables")
             for x in tables:
                 # udtrækker tabelnavn
                 name=x[0]
@@ -474,6 +482,7 @@ class MySQL:
         else:
             print("No Connection Established. Start A Session First.")
     
+    ## funktion til at slette alle ikke-nødvendige databaser fra serveren. 
     def clean_server(self):
         if self.connection:
             interface=self.connection.cursor()
@@ -496,28 +505,48 @@ class MySQL:
     def backup_db(self,db,file_path=""):
         if self.connection:
             interface=self.connection.cursor()
+            
             ## hvis file_path ikke er angivet, eksporteres databasen til rodmappen. 
             if not file_path or file_path=="":
-                file_path = os.path.join(os.getcwd(),f"{db}.sql")
+                file_path = os.path.join(os.getcwd(),f"{db}.db")
             ## hvis der kun er givet filnavn, skal vi sikre os at det rent faktisk er en sql fil. 
-            elif ".sql" not in file_path:
-                file_path+=".sql"
+            elif "db" not in file_path.split(".")[-1]:
+                file_path+=".db"
             
-            ## Jeg er nød til at give visse privilegier for at anvende mysqldumo
-            pre_command=f"GRANT ALL PRIVILEGES ON {db}.* TO {self.user}@{self.host};FLUSH PRIVILEGES;"
-            interface.execute(pre_command)
+            ## Få  fat i alle tabeller i databasen
+            interface.execute("SHOW TABLES")
+            tables=interface.fetchall()
             
-            ## så prøver vi at eksportere databasen via subprocess og mysqldump
-            ### command tilpasses det operativesystem for at sikre at det kan køre. 
-            try:
-                if os.name=="posix":
-                    command=f"mysqldump -u {self.user} -p{self.password} -h {self.host} {db} > {file_path}"
-                    subprocess.run(command, shell=True, check=True)
-                else:
-                    command=f"cmd /c mysqldump -u {self.user} -p{self.password} -h {self.host} {db}"
-                    with open(file_path, 'wb') as f:
-                        subprocess.run(command, shell=True, check=True, stdout=f)
-            except subprocess.CalledProcessError as e:
-                print(f"Backup Failed.{e}")
+            ## vi er desværre nød til at forbinde til en SQLite server for at lave en simple database eksport
+            lite_connect=sqlite3.connect(file_path)
+            lite_interface=lite_connect.cursor()
+            
+            for table in tables:
+                name=table[0]
+                
+                try:
+                    ## her henter vi kolonnenavne fra tabellen
+                    interface.execute(f"SELECT * FROM '{name}' LIMIT 1")
+                    col_description=interface.description
+                    col_names=[item[0] for item in col_description]
+                    
+                    ## her henter vi tabelindhold
+                    interface.execute(f"SELECT * FROM '{name}'")
+                    content=interface.fetchall()
+                    
+                    ## definer kolonnerne i SQLite tabellen
+                    lite_col = " ".join([f"'{col}' TEXT," for col in col_names]) 
+                    
+                    ## laver grund tabellen i SQlite
+                    lite_interface.execute(f"CREATE TABLE IF NOT EXISTS '{name}' ({lite_col})")
+                    
+                    ## læser data ind i det. 
+                    lite_interface.executemany(f"INSERT INTO '{name}' ({', '.join(col_names)}) VALUES ({', '.join(['?' for x in col_names])})",content)
+                    
+                    lite_connect.commit()
+                except Exception as e:
+                    print(f"ERROR IN EXPORTING {name}. {e}")
+            lite_connect.close()
+            
         else:
             print("No Connection Established. Start A Session First.")
