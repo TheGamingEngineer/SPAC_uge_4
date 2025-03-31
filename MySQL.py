@@ -10,7 +10,7 @@ import pandas
 import sys
 from tabulate import tabulate
 import os
-
+import subprocess
 
 ## Jeg vælger at kombinere alle MySQL-funktionerne i én kommando for at gøre det mere overskueligt og lettere at håndtere forbindelsen
 class MySQL:
@@ -167,7 +167,17 @@ class MySQL:
         self.connection.cursor().executemany(command,content_tuples)
         self.connection.commit()
 
-        
+    ## funktion som viser hele serveren med alle de databaser, som ligger på serveren. 
+    def show_server(self):
+        if self.connection:  
+            interface=self.connection.cursor()
+            interface.execute("SHOW DATABASES")
+            databases = interface.fetchall()
+            for x in databases:
+                print(x[0])
+        else:
+            print("No Connection Established. Start A Session First.")
+            
     # funktion, som viser indholdet af den database, som man bruger.
     ## Den viser kun tabel navn og dimensioner. Hvis man vil se indholdet i en tabel, kan man anvende show_table() funktionen istedet. 
     def show_db(self):
@@ -463,4 +473,51 @@ class MySQL:
             interface.close()
         else:
             print("No Connection Established. Start A Session First.")
+    
+    def clean_server(self):
+        if self.connection:
+            interface=self.connection.cursor()
+            ## finder alle databaserne på serveren
+            interface.execute("SHOW DATABASES")
+            content=interface.fetchall()
+            ## liste over standard databaser fra en MySQL server, som vi ikke vil have slettet
+            system_db = ['information_schema', 'performance_schema', 'mysql']
             
+            ## så går vi individuelt igennem hver database for at slette dem. 
+            for x in content:
+                name=x[0]
+                ## sletter kun databaser, som ikke er system databaser. 
+                if name not in system_db:
+                    interface.execute(f"DROP DATABASE {name}")
+        else:
+            print("No Connection Established. Start A Session First.")
+    
+    ## funktion til at gemme database fra serveren til computeren. 
+    def backup_db(self,db,file_path=""):
+        if self.connection:
+            interface=self.connection.cursor()
+            ## hvis file_path ikke er angivet, eksporteres databasen til rodmappen. 
+            if not file_path or file_path=="":
+                file_path = os.path.join(os.getcwd(),f"{db}.sql")
+            ## hvis der kun er givet filnavn, skal vi sikre os at det rent faktisk er en sql fil. 
+            elif ".sql" not in file_path:
+                file_path+=".sql"
+            
+            ## Jeg er nød til at give visse privilegier for at anvende mysqldumo
+            pre_command=f"GRANT ALL PRIVILEGES ON {db}.* TO {self.user}@{self.host};FLUSH PRIVILEGES;"
+            interface.execute(pre_command)
+            
+            ## så prøver vi at eksportere databasen via subprocess og mysqldump
+            ### command tilpasses det operativesystem for at sikre at det kan køre. 
+            try:
+                if os.name=="posix":
+                    command=f"mysqldump -u {self.user} -p{self.password} -h {self.host} {db} > {file_path}"
+                    subprocess.run(command, shell=True, check=True)
+                else:
+                    command=f"cmd /c mysqldump -u {self.user} -p{self.password} -h {self.host} {db}"
+                    with open(file_path, 'wb') as f:
+                        subprocess.run(command, shell=True, check=True, stdout=f)
+            except subprocess.CalledProcessError as e:
+                print(f"Backup Failed.{e}")
+        else:
+            print("No Connection Established. Start A Session First.")

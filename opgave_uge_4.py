@@ -77,4 +77,7 @@ mydb.delete_col("all_orders","product")
 print("exporting all_orders table as a csv file")
 mydb.export_tables("./tests/","all_orders")
 
-mydb.disconnect()    
+#print("exporting database")
+#mydb.backup_db("business")
+
+#mydb.disconnect()    
