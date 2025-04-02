@@ -526,27 +526,81 @@ class MySQL:
                 
                 try:
                     ## her henter vi kolonnenavne fra tabellen
-                    interface.execute(f"SELECT * FROM '{name}' LIMIT 1")
+                    interface.execute(f"SELECT * FROM `{name}` LIMIT 1")
+                    trash=interface.fetchone() ## Jeg er nød til at tømme interface før den kan genanvendes, så jeg gemmer det i en ubrugt variabel
                     col_description=interface.description
                     col_names=[item[0] for item in col_description]
                     
                     ## her henter vi tabelindhold
-                    interface.execute(f"SELECT * FROM '{name}'")
+                    interface.execute(f"SELECT * FROM `{name}`")
                     content=interface.fetchall()
                     
                     ## definer kolonnerne i SQLite tabellen
-                    lite_col = " ".join([f"'{col}' TEXT," for col in col_names]) 
+                    lite_col = ", ".join([f"'{col}' TEXT" for col in col_names]) 
                     
                     ## laver grund tabellen i SQlite
-                    lite_interface.execute(f"CREATE TABLE IF NOT EXISTS '{name}' ({lite_col})")
+                    lite_interface.execute(f"CREATE TABLE IF NOT EXISTS `{name}` ({lite_col})")
                     
                     ## læser data ind i det. 
-                    lite_interface.executemany(f"INSERT INTO '{name}' ({', '.join(col_names)}) VALUES ({', '.join(['?' for x in col_names])})",content)
+                    lite_interface.executemany(f"INSERT INTO `{name}` ({', '.join(col_names)}) VALUES ({', '.join(['?' for x in col_names])})",content)
                     
                     lite_connect.commit()
                 except Exception as e:
                     print(f"ERROR IN EXPORTING {name}. {e}")
             lite_connect.close()
             
+        else:
+            print("No Connection Established. Start A Session First.")
+            
+    ## funktion til at undersøge data type og danne let overblik over data information
+    ### tabel skal bare være en streng med tabelnavnet og colname skal ligeledes være en streng med kolonnenavne. 
+    ### colname burde også kunne tage Wildcard variabler (defineret med tilstedeværelsen af % og/eller _)
+    def describe(self,tabel,colname="*"):
+        if self.connection:
+            interface=self.connection.cursor()
+            
+            ## definer kommandoen altefter om man ønsker at beskrive en hel tabel, en enkelt variabel eller flere via et wildcard 
+            command=f"DESC {tabel}"
+            if colname!="*":
+                command+=f" {colname}"
+            
+            ## eksevker kommando og hent resultater
+            interface.execute(command)
+            content=interface.fetchall()
+            
+            ## henter kolonnenavnene og sætter det pænt op
+            col_description=interface.description
+            col_names=[item[0] for item in col_description]
+            
+            ## sætter tabellen pænt op og udskriver den
+            print(tabulate(content,headers=col_names,tablefmt="fancy_grid"))
+        else:
+            print("No Connection Established. Start A Session First.")
+    
+    
+    def change_coltype(self,tabel,colname,newtype,dateformat="%d-%m-%Y"):
+        if self.connection:
+            interface=self.connection.cursor()
+            
+            newtype=newtype.upper()
+            
+            command=f"ALTER TABLE {tabel} MODIFY COLUMN {colname} {newtype}"
+            try:
+                if newtype=="DATE":
+                    ## hvis variablen skal være en datovariabel, skal vi sikre os at den kan læses som en datovariabel af MySQL
+                    ### Vi vil også sikre os at funktionen ikke fejler, hvis der er tomme variabler. Såsom hvis en dato ikke er givet for en afsluttet datovariabel
+                    date_mod_command=f"""UPDATE `{tabel}` 
+                                        SET `{colname}` = STR_TO_DATE(`{colname}`,{dateformat}) 
+                                        WHERE `{colname}` IS NOT NULL AND `{colname}` != ''"""
+                                        
+                    ## eksekvere denne opdatering inden vi ændre datatype
+                    interface.execute(date_mod_command)
+                    self.connection.commit()
+                
+                ## eksevker kommando for at ændre datatype. 
+                interface.execute(command)
+                self.connection.execute()
+            except Exception as e:
+                print(f"ERROR IN CHANGING {colname} TO {newtype}: {e}")
         else:
             print("No Connection Established. Start A Session First.")
