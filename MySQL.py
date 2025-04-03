@@ -12,6 +12,7 @@ from tabulate import tabulate
 import os
 import subprocess
 import sqlite3
+import re
 
 ## Jeg vælger at kombinere alle MySQL-funktionerne i én kommando for at gøre det mere overskueligt og lettere at håndtere forbindelsen
 class MySQL:
@@ -578,7 +579,7 @@ class MySQL:
             print("No Connection Established. Start A Session First.")
     
     
-    def change_coltype(self,tabel,colname,newtype,dateformat="%d-%m-%Y"):
+    def change_coltype(self,tabel,colname,newtype):
         if self.connection:
             interface=self.connection.cursor()
             
@@ -588,9 +589,33 @@ class MySQL:
             try:
                 if newtype=="DATE":
                     ## hvis variablen skal være en datovariabel, skal vi sikre os at den kan læses som en datovariabel af MySQL
-                    ### Vi vil også sikre os at funktionen ikke fejler, hvis der er tomme variabler. Såsom hvis en dato ikke er givet for en afsluttet datovariabel
+                    date_formats = [(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "%Y-%m-%dT%H:%i:%s"),
+                                    (r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d"),
+                                    (r"\d{2}/\d{2}/\d{4}", "%d/%m/%Y"),
+                                    (r"\d{2}-\d{2}-\d{4}", "%d-%m-%Y"),
+                                    (r"\d{4}/\d{2}/\d{2}", "%Y/%m/%d")]
+                    
+                    ## Vi laver et hurtigt udtræk på de 5 første ikke-tomme celler i variablen og ser hvilket format de er i.
+                    value_extract_command=f"SELECT {colname} FROM {tabel} WHERE {colname} IS NOT NULL LIMIT 5"
+                    interface.execute(value_extract_command)
+                    raw_samples=interface.fetchall()
+                    value_samples=[cell[0] for cell in raw_samples]
+                    
+                    ## så tjekker vi formattet
+                    final_format=""
+                    for value in value_samples:
+                        for pattern,Format in date_formats:
+                            if re.match(pattern,value):
+                                if final_format=="":
+                                    final_format=Format
+                                #elif final_format!=Format:
+                                #    raise AttributeError(f"Column {colname} in Tabel {tabel} Contains Values of Multiple Different Format")
+                    if final_format=="":
+                        raise ValueError(f"No Date Format Detected for Column {colname} in Tabel {tabel}.")
+                    
+                    ## Vi vil også sikre os at funktionen ikke fejler, hvis der er tomme variabler. Såsom hvis en dato ikke er givet for en afsluttet datovariabel
                     date_mod_command=f"""UPDATE `{tabel}` 
-                                        SET `{colname}` = STR_TO_DATE(`{colname}`,{dateformat}) 
+                                        SET `{colname}` = STR_TO_DATE(SUBSTRING_INDEX(`{colname}`, '+', 1),'{final_format}')
                                         WHERE `{colname}` IS NOT NULL AND `{colname}` != ''"""
                                         
                     ## eksekvere denne opdatering inden vi ændre datatype
@@ -599,7 +624,7 @@ class MySQL:
                 
                 ## eksevker kommando for at ændre datatype. 
                 interface.execute(command)
-                self.connection.execute()
+                self.connection.commit()
             except Exception as e:
                 print(f"ERROR IN CHANGING {colname} TO {newtype}: {e}")
         else:
