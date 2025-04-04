@@ -10,7 +10,6 @@ import pandas
 import sys
 from tabulate import tabulate
 import os
-import subprocess
 import sqlite3
 import re
 
@@ -131,27 +130,20 @@ class MySQL:
     
     # funktion til at indsætte en tabel i databasen fra en .csv fil eller en pandas.dataframe. 
     ## her menes det, at: 
-    ### 'name' er navnet på tabellen i databasen
     ### 'tabel' er den tabel, som man gerne vil indsætte i databasen
-    def import_table(self,name,tabel):
+    def import_table(self,tabel):
         ## hvis 'tabel' indhentes direkte fra en .csv fil, vil tabellen hentes og åbnes som en pandas.dataframe
-        if not type(tabel)==pandas.core.frame.DataFrame and ".csv" in tabel:
-            try:
-                data=pandas.read_csv(tabel,sep=",")
-            except FileNotFoundError as e:
-                print(f"File not found: {e}. Either the filename has been given erroneously, path to file has not been provided when needed, or file simply does not exist!")
-            except PermissionError as e:
-                print(f"Permission denied: {e}. Please change permissions of the file and try again.")
-            except OSError as e:
-                print(f"OS error: {e}.")
-            except Exception as e:
-                print(f"An unexpected error occurred: {e}.")
-        ## hvis 'tabel' allerede er en pandas.dataframe, vil den blot blive omdefineret for at kunne anvende det samme uden kontekstændringer. 
-        elif type(tabel)==pandas.core.frame.DataFrame:
-            data=tabel
+        try:
+            name=os.path.basename(tabel)
+            name=name.split(".")[0]
+            
+            if ".csv" not in tabel:
+                raise ValueError("Uploaded fil must be in .csv format.")
+            data=pandas.read_csv(tabel,sep=",")
+        
         ## der kan tages højde for andre data-input (såsom fra .xlsx filer), men for denne opgave, vil der kun blive taget højde for .csv filer og pandas.dataframe's
-        else:
-            print("ERROR: For This either use a .csv file or a pandas dataframe. ")
+        except Exception as e:
+            print(f"ERROR IN IMPORTING {tabel}: {e}")
             sys.exit()
         
         # opretter en tom tabel med antallet af kolonner svarende til kolonnenavnene fra 'tabel' (kodeinspiration fra www.w3schools.com) 
